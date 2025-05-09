@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Reconocimiento Facial</title>
   <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
   <style>
@@ -10,19 +11,31 @@
       color: white;
       text-align: center;
       font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 0;
     }
 
-    canvas, video {
+    h1 {
+      color: #ff8800;
+      margin-top: 20px;
+    }
+
+    video, canvas {
       position: absolute;
+      top: 0;
       left: 50%;
       transform: translateX(-50%);
       border: 4px solid #ff8800;
       border-radius: 12px;
-      margin-top: 10px;
+      width: 100%;
+      max-width: 640px;
     }
 
     #nombreDetectado {
-      margin-top: 500px;
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
       font-size: 1.5em;
       color: #ff8800;
     }
@@ -41,13 +54,18 @@
     const nombreDiv = document.getElementById('nombreDetectado');
 
     async function cargarModelos() {
+      // Cargar los modelos necesarios desde el servidor
       await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+      await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+      await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+
       nombreDiv.textContent = "Modelos cargados. Activando cámara...";
       iniciarCamara();
     }
 
     async function iniciarCamara() {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      // Acceder a la cámara
+      const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
       video.srcObject = stream;
       video.onloadedmetadata = () => {
         video.play();
@@ -56,21 +74,27 @@
     }
 
     async function detectarEnTiempoReal() {
+      // Detectar rostros continuamente
       const opciones = new faceapi.TinyFaceDetectorOptions();
       setInterval(async () => {
-        const detecciones = await faceapi.detectAllFaces(video, opciones);
+        const detecciones = await faceapi.detectAllFaces(video, opciones)
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+
         context.clearRect(0, 0, canvas.width, canvas.height);
         faceapi.draw.drawDetections(canvas, detecciones);
+        faceapi.draw.drawFaceLandmarks(canvas, detecciones);
 
         if (detecciones.length > 0) {
-          capturarYReconocer();
+          capturarYReconocer(detecciones);
         } else {
           nombreDiv.textContent = "Detectando rostro...";
         }
-      }, 1000);
+      }, 100);
     }
 
-    async function capturarYReconocer() {
+    async function capturarYReconocer(detecciones) {
+      // Capturar imagen del rostro detectado y enviar al servidor
       const tempCanvas = document.createElement("canvas");
       tempCanvas.width = video.videoWidth;
       tempCanvas.height = video.videoHeight;

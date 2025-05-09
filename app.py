@@ -8,6 +8,10 @@ import os
 
 app = Flask(__name__)
 
+# Verificar si el archivo de rostros existe
+if not os.path.exists("rostros.pkl"):
+    raise FileNotFoundError("El archivo 'rostros.pkl' no se encuentra en el directorio actual.")
+
 # Cargar rostros conocidos
 with open("rostros.pkl", "rb") as f:
     rostros_codificados, nombres_rostros = pickle.load(f)
@@ -28,9 +32,11 @@ def reconocer():
         nparr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
+        # Redimensionar la imagen
         pequeño = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
         rgb = cv2.cvtColor(pequeño, cv2.COLOR_BGR2RGB)
 
+        # Detectar caras
         ubicaciones = face_recognition.face_locations(rgb)
         codigos = face_recognition.face_encodings(rgb, ubicaciones)
 
@@ -42,7 +48,7 @@ def reconocer():
 
         return jsonify({"nombre": "Desconocido"})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Error al procesar la imagen: {str(e)}"}), 500
 
 # Servir archivos de modelos (para face-api.js)
 @app.route("/models/<path:filename>")
