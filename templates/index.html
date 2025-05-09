@@ -1,14 +1,36 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Reconocimiento Facial</title>
-</head>
-<body>
-  <h1>📷 Escanea tu rostro</h1>
-  <video id="video" width="320" height="240" autoplay></video>
-  <br>
-  <button onclick="capturar()">📸 Capturar</button>
-  <p id="resultado"></p>
-  <script src="/static/script.js"></script>
-</body>
-</html>
+<video id="video" width="320" height="240" autoplay playsinline style="display: none;"></video>
+<img id="preview" width="320" height="240" />
+<div id="nombre">Esperando rostro...</div>
+
+<script>
+  const video = document.getElementById("video");
+  const preview = document.getElementById("preview");
+  const nombreDiv = document.getElementById("nombre");
+
+  navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => video.srcObject = stream)
+    .catch(() => nombreDiv.innerText = "No se pudo acceder a la cámara.");
+
+  setInterval(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+
+    const dataUrl = canvas.toDataURL("image/jpeg");
+    fetch("/reconocer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imagen: dataUrl })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.imagen) {
+        preview.src = data.imagen;
+      }
+    })
+    .catch(() => {
+      nombreDiv.innerText = "Error en el reconocimiento.";
+    });
+  }, 2500);
+</script>

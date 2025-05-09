@@ -13,7 +13,7 @@ with open("rostros.pkl", "rb") as f:
 
 @app.route("/")
 def index():
-    return render_template("index_v0.html")
+    return render_template("index.html")
 
 @app.route("/reconocer", methods=["POST"])
 def reconocer():
@@ -32,13 +32,25 @@ def reconocer():
     ubicaciones = face_recognition.face_locations(rgb)
     codigos = face_recognition.face_encodings(rgb, ubicaciones)
 
-    for cod in codigos:
+    nombres_detectados = []
+
+    for cod, ubicacion in zip(codigos, ubicaciones):
         coincidencias = face_recognition.compare_faces(rostros_codificados, cod)
+        nombre = "Desconocido"
         if True in coincidencias:
             index = coincidencias.index(True)
-            return jsonify({"nombre": nombres_rostros[index]})
+            nombre = nombres_rostros[index]
+        nombres_detectados.append(nombre)
 
-    return jsonify({"nombre": "Desconocido"})
+        # Escalar las ubicaciones al tamaño original
+        top, right, bottom, left = [v * 4 for v in ubicacion]
+        cv2.rectangle(img, (left, top), (right, bottom), (0, 140, 255), 2)
+        cv2.putText(img, nombre, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 140, 255), 2)
+
+    # Codificar imagen anotada
+    _, buffer = cv2.imencode('.jpg', img)
+    img_encoded = base64.b64encode(buffer).decode('utf-8')
+    return jsonify({"imagen": f"data:image/jpeg;base64,{img_encoded}"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
