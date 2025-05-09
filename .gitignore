@@ -1,0 +1,15 @@
+# Ignorar directorio con rostros conocidos
+conocidos/
+
+# Ignorar archivo generado
+rostros.pkl
+
+# Entorno virtual
+venv/
+.env/
+
+# Archivos temporales
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
