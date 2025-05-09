@@ -1,9 +1,6 @@
 # Ignorar directorio con rostros conocidos
 conocidos/
 
-# Ignorar archivo generado
-rostros.pkl
-
 # Entorno virtual
 venv/
 .env/
