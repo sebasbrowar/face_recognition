@@ -1,19 +1,23 @@
-import face_recognition
-import cv2
+import pickle
+import os
+import logging
 
-# Ruta de prueba
-ruta_img = "C:/Users/sbrxb/PycharmProjects/face_recognition/conocidos/sebastian/frame_300.jpg"
-
-# Leer imagen con OpenCV
-img_bgr = cv2.imread(ruta_img)
-img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-
-# Obtener codificación
 try:
-    codigos = face_recognition.face_encodings(img_rgb)
-    if codigos:
-        print("✅ Rostro codificado exitosamente.")
-    else:
-        print("⚠️ No se detectó ningún rostro en la imagen.")
+    if not os.path.exists("rostros.pkl"):
+        raise FileNotFoundError("Archivo 'rostros.pkl' no encontrado.")
+
+    with open("rostros.pkl", "rb") as f:
+        rostros_codificados, nombres_rostros = pickle.load(f)
+
+    if not rostros_codificados or not nombres_rostros:
+        raise ValueError("Datos en 'rostros.pkl' están vacíos o corruptos.")
 except Exception as e:
-    print(f"❌ Error al codificar el rostro: {e}")
+    logging.error(f"Error al cargar rostros: {str(e)}")
+    raise RuntimeError(f"No se pudo iniciar el servicio: {str(e)}")
+
+# Añade esto ANTES de cargar el archivo en tu código Flask
+print(f"Tamaño del archivo rostros.pkl: {os.path.getsize('rostros.pkl')} bytes")
+with open("rostros.pkl", "rb") as f:
+    data = pickle.load(f)
+    print(f"Número de rostros cargados: {len(data[0])}")  # Debe ser > 0
+    print(f"Ejemplo de nombre: {data[1][0]}")  # Muestra el primer nombre

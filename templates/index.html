@@ -2,42 +2,56 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Meta viewport mejorado para móviles -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Reconocimiento Facial</title>
   <script defer src="/static/js/face-api.min.js"></script>
   <style>
     body {
       background-color: #1e1e1e;
       color: white;
-      text-align: center;
       font-family: 'Segoe UI', sans-serif;
       margin: 0;
       padding: 0;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
 
     h1 {
       color: #ff8800;
-      margin-top: 20px;
+      margin: 10px 0;
+      font-size: 1.5rem;
+      text-align: center;
+    }
+
+    #camera-container {
+      position: relative;
+      width: 100%;
+      flex-grow: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
     }
 
     video, canvas {
-      position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
+      width: 100% !important;
+      height: auto !important;
+      max-width: 100%;
+      max-height: 70vh;
+      object-fit: contain;
       border: 4px solid #ff8800;
       border-radius: 12px;
-      width: 100%;
-      max-width: 640px;
     }
 
     #nombreDetectado {
-      position: absolute;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 1.5em;
+      text-align: center;
+      font-size: 1.2rem;
       color: #ff8800;
+      margin: 10px 0;
+      padding: 0 10px;
     }
 
     #loader {
@@ -45,28 +59,35 @@
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      font-size: 1.2em;
+      font-size: 1.2rem;
+      background: rgba(0,0,0,0.7);
+      padding: 15px;
+      border-radius: 8px;
     }
 
     #controls {
-      position: fixed;
-      bottom: 60px;
-      left: 50%;
-      transform: translateX(-50%);
+      text-align: center;
+      margin: 10px 0;
     }
 
     button {
       background-color: #ff8800;
       color: white;
       border: none;
-      padding: 8px 16px;
+      padding: 10px 20px;
       border-radius: 4px;
+      font-size: 1rem;
       cursor: pointer;
-      margin: 0 5px;
+      margin: 5px;
     }
 
-    button:hover {
-      background-color: #ff6600;
+    @media (orientation: landscape) {
+      #camera-container {
+        max-height: 60vh;
+      }
+      video, canvas {
+        max-height: 60vh;
+      }
     }
   </style>
 </head>
@@ -74,8 +95,10 @@
   <h1>Reconocimiento Facial</h1>
   <div id="loader">Cargando modelos de reconocimiento facial...</div>
 
-  <video id="video" width="640" height="480" autoplay muted></video>
-  <canvas id="overlay" width="640" height="480"></canvas>
+  <div id="camera-container">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
 
   <div id="controls" style="display: none;">
     <button id="toggleCamera">Detener Cámara</button>
@@ -91,20 +114,49 @@
     const loader = document.getElementById('loader');
     const controls = document.getElementById('controls');
     const toggleCameraBtn = document.getElementById('toggleCamera');
+    const cameraContainer = document.getElementById('camera-container');
 
     let stream = null;
     let detectionInterval = null;
     let isCameraActive = false;
 
+    // Función para ajustar el tamaño del canvas
+    function resizeCanvas() {
+      canvas.width = video.offsetWidth;
+      canvas.height = video.offsetHeight;
+    }
+
+    // Configuración inicial de la cámara
+    async function setupCamera() {
+      try {
+        const constraints = {
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+
+        video.onloadedmetadata = () => {
+          video.play();
+          resizeCanvas();
+          window.addEventListener('resize', resizeCanvas);
+        };
+      } catch (error) {
+        throw new Error(`No se pudo acceder a la cámara: ${error.message}`);
+      }
+    }
+
     // Esperamos que el script de face-api.js se cargue correctamente
     window.onload = async () => {
-      // Verificamos si faceapi está disponible
       if (typeof faceapi === 'undefined') {
         showError('face-api.js no se ha cargado correctamente');
         return;
       }
 
-      // Si se carga correctamente, cargamos los modelos
       try {
         await cargarModelos();
       } catch (error) {
@@ -114,10 +166,8 @@
 
     async function cargarModelos() {
       try {
-        // Mostrar loader
         loader.textContent = "Cargando modelos de detección facial...";
 
-        // Cargar los modelos necesarios desde el servidor
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
           faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
@@ -126,7 +176,6 @@
 
         loader.textContent = "Modelos cargados correctamente!";
 
-        // Ocultar loader después de 1 segundo
         setTimeout(() => {
           loader.style.display = 'none';
           controls.style.display = 'block';
@@ -141,42 +190,23 @@
       try {
         if (isCameraActive) return;
 
-        // Acceder a la cámara
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "user",
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          }
-        });
-
-        video.srcObject = stream;
+        await setupCamera();
         isCameraActive = true;
         toggleCameraBtn.textContent = "Detener Cámara";
-
-        video.onloadedmetadata = () => {
-          video.play();
-          detectarEnTiempoReal();
-        };
-
-        video.onerror = () => {
-          throw new Error("Error al reproducir el video de la cámara");
-        };
+        detectarEnTiempoReal();
       } catch (error) {
-        throw new Error(`No se pudo acceder a la cámara: ${error.message}`);
+        throw new Error(`Error al iniciar cámara: ${error.message}`);
       }
     }
 
     function detenerCamara() {
       if (!isCameraActive) return;
 
-      // Detener detección
       if (detectionInterval) {
         clearInterval(detectionInterval);
         detectionInterval = null;
       }
 
-      // Detener stream de cámara
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
         stream = null;
@@ -186,15 +216,15 @@
       toggleCameraBtn.textContent = "Activar Cámara";
       context.clearRect(0, 0, canvas.width, canvas.height);
       nombreDiv.textContent = "Cámara detenida";
+      window.removeEventListener('resize', resizeCanvas);
     }
 
     async function detectarEnTiempoReal() {
-      // Detectar rostros cada 300ms (ajustable)
       detectionInterval = setInterval(async () => {
         try {
           const opciones = new faceapi.TinyFaceDetectorOptions({
-            inputSize: 320,  // Balance entre rendimiento y precisión
-            scoreThreshold: 0.5  // Umbral de confianza
+            inputSize: 320,
+            scoreThreshold: 0.5
           });
 
           const detecciones = await faceapi.detectAllFaces(video, opciones)
@@ -210,8 +240,6 @@
             });
 
             faceapi.draw.drawDetections(canvas, resizedDetections);
-            faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
-
             await capturarYReconocer(detecciones);
           } else {
             nombreDiv.textContent = "Buscando rostros...";
@@ -227,15 +255,13 @@
       try {
         nombreDiv.textContent = "Procesando rostro...";
 
-        // Capturar imagen del rostro detectado
         const tempCanvas = document.createElement("canvas");
         tempCanvas.width = video.videoWidth;
         tempCanvas.height = video.videoHeight;
         const tempCtx = tempCanvas.getContext("2d");
         tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-        const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.8);  // Calidad 80%
+        const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.8);
 
-        // Enviar al servidor para reconocimiento
         const respuesta = await fetch('/reconocer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -265,7 +291,6 @@
       loader.style.color = "#ff4444";
     }
 
-    // Event listeners
     toggleCameraBtn.addEventListener('click', () => {
       if (isCameraActive) {
         detenerCamara();
@@ -274,10 +299,15 @@
       }
     });
 
-    // Limpiar al cerrar la página
     window.addEventListener('beforeunload', () => {
       detenerCamara();
     });
+
+    // Manejo de orientación en móviles
+    function handleOrientation() {
+      resizeCanvas();
+    }
+    window.addEventListener('orientationchange', handleOrientation);
   </script>
 </body>
 </html>
