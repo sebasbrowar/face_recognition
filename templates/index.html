@@ -53,21 +53,8 @@
     const context = canvas.getContext('2d');
     const nombreDiv = document.getElementById('nombreDetectado');
 
-    // Esperamos que el script de face-api.js se cargue correctamente
-    window.onload = () => {
-      // Verificamos si faceapi está disponible
-      if (typeof faceapi === 'undefined') {
-        console.error('face-api.js no se ha cargado correctamente');
-        return;
-      }
-
-      // Si se carga correctamente, cargamos los modelos
-      cargarModelos();
-    };
-
     async function cargarModelos() {
       try {
-        // Cargar los modelos necesarios desde el servidor
         await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
         await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
         await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
@@ -75,32 +62,44 @@
         nombreDiv.textContent = "Modelos cargados. Activando cámara...";
         iniciarCamara();
       } catch (error) {
-        console.error('Error al cargar los modelos:', error);
-        nombreDiv.textContent = "Error al cargar los modelos.";
+        nombreDiv.textContent = "Error al cargar modelos";
+        console.error("Error al cargar modelos:", error);
       }
     }
 
     async function iniciarCamara() {
-      // Acceder a la cámara
-      const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
-      video.srcObject = stream;
-      video.onloadedmetadata = () => {
-        video.play();
-        detectarEnTiempoReal();
-      };
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false
+        });
+
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          detectarEnTiempoReal();
+        };
+      } catch (error) {
+        nombreDiv.textContent = "Error al acceder a la cámara";
+        console.error("Error de cámara:", error);
+      }
     }
 
     async function detectarEnTiempoReal() {
-      // Detectar rostros continuamente
       const opciones = new faceapi.TinyFaceDetectorOptions();
+
       setInterval(async () => {
         const detecciones = await faceapi.detectAllFaces(video, opciones)
           .withFaceLandmarks()
           .withFaceDescriptors();
 
         context.clearRect(0, 0, canvas.width, canvas.height);
-        faceapi.draw.drawDetections(canvas, detecciones);
-        faceapi.draw.drawFaceLandmarks(canvas, detecciones);
+
+        const resizedDetections = faceapi.resizeResults(detecciones, {
+          width: canvas.width,
+          height: canvas.height
+        });
+        faceapi.draw.drawDetections(canvas, resizedDetections);
 
         if (detecciones.length > 0) {
           capturarYReconocer(detecciones);
@@ -111,7 +110,6 @@
     }
 
     async function capturarYReconocer(detecciones) {
-      // Capturar imagen del rostro detectado y enviar al servidor
       const tempCanvas = document.createElement("canvas");
       tempCanvas.width = video.videoWidth;
       tempCanvas.height = video.videoHeight;
@@ -131,6 +129,8 @@
         nombreDiv.textContent = "Error al reconocer rostro";
       }
     }
+
+    cargarModelos();
   </script>
 </body>
 </html>
