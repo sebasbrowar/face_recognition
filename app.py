@@ -32,25 +32,21 @@ def reconocer():
     ubicaciones = face_recognition.face_locations(rgb)
     codigos = face_recognition.face_encodings(rgb, ubicaciones)
 
-    nombres_detectados = []
-
-    for cod, ubicacion in zip(codigos, ubicaciones):
+    for ubicacion, cod in zip(ubicaciones, codigos):
         coincidencias = face_recognition.compare_faces(rostros_codificados, cod)
         nombre = "Desconocido"
+
         if True in coincidencias:
             index = coincidencias.index(True)
             nombre = nombres_rostros[index]
-        nombres_detectados.append(nombre)
 
-        # Escalar las ubicaciones al tamaño original
         top, right, bottom, left = [v * 4 for v in ubicacion]
-        cv2.rectangle(img, (left, top), (right, bottom), (0, 140, 255), 2)
-        cv2.putText(img, nombre, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 140, 255), 2)
+        cv2.rectangle(img, (left, top), (right, bottom), (255, 140, 0), 2)
+        cv2.putText(img, nombre, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 140, 0), 2)
 
-    # Codificar imagen anotada
-    _, buffer = cv2.imencode('.jpg', img)
-    img_encoded = base64.b64encode(buffer).decode('utf-8')
-    return jsonify({"imagen": f"data:image/jpeg;base64,{img_encoded}"})
+    _, buffer = cv2.imencode(".jpg", img)
+    img_base64 = base64.b64encode(buffer).decode("utf-8")
+    return jsonify({"imagen_procesada": "data:image/jpeg;base64," + img_base64})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
