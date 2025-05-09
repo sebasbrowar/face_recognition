@@ -6,7 +6,7 @@ import cv2
 import base64
 import os
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # Verificar si el archivo de rostros existe
 if not os.path.exists("rostros.pkl"):
