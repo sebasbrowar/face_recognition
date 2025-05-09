@@ -2,89 +2,96 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Reconocimiento Facial</title>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
   <style>
     body {
-      margin: 0;
-      padding: 0;
-      font-family: 'Roboto', sans-serif;
-      background: linear-gradient(to right, #ffb347, #ffcc33);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      color: #333;
+      background-color: #1e1e1e;
+      color: white;
+      text-align: center;
+      font-family: 'Segoe UI', sans-serif;
     }
-    h1 {
-      margin-bottom: 20px;
-      font-size: 2.5rem;
-      color: #fff;
-      text-shadow: 1px 1px 4px #000;
+
+    canvas, video {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 4px solid #ff8800;
+      border-radius: 12px;
+      margin-top: 10px;
     }
-    #imagen {
-      border: 6px solid #ff6600;
-      border-radius: 15px;
-      max-width: 90%;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
-    }
-    #estado {
-      margin-top: 20px;
-      font-size: 1.2rem;
-      color: #fff;
+
+    #nombreDetectado {
+      margin-top: 500px;
+      font-size: 1.5em;
+      color: #ff8800;
     }
   </style>
 </head>
 <body>
   <h1>Reconocimiento Facial</h1>
-  <img id="imagen" src="" alt="Captura de cámara">
-  <canvas id="canvas" style="display: none;"></canvas>
-  <div id="estado">Cargando cámara...</div>
+  <video id="video" width="640" height="480" autoplay muted></video>
+  <canvas id="overlay" width="640" height="480"></canvas>
+  <div id="nombreDetectado">Cargando modelos...</div>
 
   <script>
-    const imagen = document.getElementById("imagen");
-    const canvas = document.getElementById("canvas");
-    const estado = document.getElementById("estado");
-    const context = canvas.getContext("2d");
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('overlay');
+    const context = canvas.getContext('2d');
+    const nombreDiv = document.getElementById('nombreDetectado');
+
+    async function cargarModelos() {
+      await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+      nombreDiv.textContent = "Modelos cargados. Activando cámara...";
+      iniciarCamara();
+    }
 
     async function iniciarCamara() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const video = document.createElement("video");
-        video.srcObject = stream;
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      video.onloadedmetadata = () => {
         video.play();
+        detectarEnTiempoReal();
+      };
+    }
 
-        video.addEventListener("loadeddata", () => {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          estado.textContent = "Reconociendo rostros...";
+    async function detectarEnTiempoReal() {
+      const opciones = new faceapi.TinyFaceDetectorOptions();
+      setInterval(async () => {
+        const detecciones = await faceapi.detectAllFaces(video, opciones);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        faceapi.draw.drawDetections(canvas, detecciones);
 
-          setInterval(() => {
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL("image/jpeg");
+        if (detecciones.length > 0) {
+          capturarYReconocer();
+        } else {
+          nombreDiv.textContent = "Detectando rostro...";
+        }
+      }, 1000);
+    }
 
-            fetch("/reconocer", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ imagen: dataUrl })
-            })
-            .then(res => res.json())
-            .then(data => {
-              imagen.src = data.imagen_procesada;
-            })
-            .catch(() => {
-              estado.textContent = "Error al procesar la imagen";
-            });
-          }, 5000);
+    async function capturarYReconocer() {
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = video.videoWidth;
+      tempCanvas.height = video.videoHeight;
+      const tempCtx = tempCanvas.getContext("2d");
+      tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+      const dataUrl = tempCanvas.toDataURL('image/jpeg');
+
+      try {
+        const respuesta = await fetch('/reconocer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imagen: dataUrl })
         });
-      } catch (error) {
-        estado.textContent = "No se pudo acceder a la cámara";
+        const resultado = await respuesta.json();
+        nombreDiv.textContent = `Reconocido: ${resultado.nombre}`;
+      } catch {
+        nombreDiv.textContent = "Error al reconocer rostro";
       }
     }
 
-    iniciarCamara();
+    cargarModelos();
   </script>
 </body>
 </html>

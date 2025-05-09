@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import face_recognition
 import numpy as np
 import pickle
 import cv2
 import base64
+import os
 
 app = Flask(__name__)
 
@@ -21,33 +22,33 @@ def reconocer():
     if not data_url:
         return jsonify({"error": "No se recibió imagen"}), 400
 
-    header, encoded = data_url.split(",", 1)
-    img_bytes = base64.b64decode(encoded)
-    nparr = np.frombuffer(img_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    try:
+        header, encoded = data_url.split(",", 1)
+        img_bytes = base64.b64decode(encoded)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    pequeño = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
-    rgb = cv2.cvtColor(pequeño, cv2.COLOR_BGR2RGB)
+        pequeño = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
+        rgb = cv2.cvtColor(pequeño, cv2.COLOR_BGR2RGB)
 
-    ubicaciones = face_recognition.face_locations(rgb)
-    codigos = face_recognition.face_encodings(rgb, ubicaciones)
+        ubicaciones = face_recognition.face_locations(rgb)
+        codigos = face_recognition.face_encodings(rgb, ubicaciones)
 
-    for ubicacion, cod in zip(ubicaciones, codigos):
-        coincidencias = face_recognition.compare_faces(rostros_codificados, cod)
-        nombre = "Desconocido"
+        for cod in codigos:
+            coincidencias = face_recognition.compare_faces(rostros_codificados, cod)
+            if True in coincidencias:
+                index = coincidencias.index(True)
+                return jsonify({"nombre": nombres_rostros[index]})
 
-        if True in coincidencias:
-            index = coincidencias.index(True)
-            nombre = nombres_rostros[index]
+        return jsonify({"nombre": "Desconocido"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-        top, right, bottom, left = [v * 4 for v in ubicacion]
-        cv2.rectangle(img, (left, top), (right, bottom), (255, 140, 0), 2)
-        cv2.putText(img, nombre, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 140, 0), 2)
-
-    _, buffer = cv2.imencode(".jpg", img)
-    img_base64 = base64.b64encode(buffer).decode("utf-8")
-    return jsonify({"imagen_procesada": "data:image/jpeg;base64," + img_base64})
+# Servir archivos de modelos (para face-api.js)
+@app.route("/models/<path:filename>")
+def serve_model(filename):
+    return send_from_directory("models", filename)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
