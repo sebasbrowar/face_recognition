@@ -1,8 +1,10 @@
 import pickle
 import face_recognition
 import numpy as np
-from flask import Flask, render_template, Response, jsonify
+from flask import Flask, render_template, Response, jsonify, request
 import cv2, os
+from io import BytesIO
+from PIL import Image
 
 # Cargar embeddings desde el archivo 'rostros.pkl'
 with open('rostros.pkl', 'rb') as f:
@@ -12,12 +14,51 @@ with open('rostros.pkl', 'rb') as f:
 known_encodings = []
 known_names = []
 
-# Recorrer todos los arrays de encodings y añadirlos a las listas correspondientes
 for i, encodings in enumerate(known_faces[:-1]):  # Excluimos el último elemento que es la lista de nombres
     known_encodings.extend(encodings)
     known_names.extend([known_faces[-1][i]] * len(encodings))  # Añadimos el nombre correspondiente a cada encoding
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
+
+
+# Ruta para la página principal
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+# Ruta para el video feed (streaming en vivo desde la cámara)
+@app.route('/video_feed')
+def video_feed():
+    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+# Ruta para el reconocimiento de la cara cuando se envía una imagen desde el cliente
+@app.route('/reconocer', methods=['POST'])
+def reconocer():
+    file = request.files['image']  # Recibe la imagen desde el cliente
+    img = Image.open(file.stream)  # Convierte la imagen recibida en un objeto PIL
+    frame = np.array(img)  # Convierte la imagen PIL a un array de NumPy (compatible con OpenCV)
+
+    rgb_frame = frame[:, :, ::-1]  # Convierte la imagen a RGB (para face_recognition)
+    face_locations = face_recognition.face_locations(rgb_frame)
+    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+
+    names = []
+    for face_encoding in face_encodings:
+        matches = face_recognition.compare_faces(known_encodings, face_encoding)
+        name = "Desconocido"
+
+        face_distances = face_recognition.face_distance(known_encodings, face_encoding)
+        if len(face_distances) > 0:
+            best_match_index = np.argmin(face_distances)
+            if matches[best_match_index]:
+                name = known_names[best_match_index]
+        names.append(name)
+
+    # Devolver el resultado (por ejemplo, el nombre de la persona reconocida)
+    return jsonify({'names': names, 'locations': face_locations})
+
 
 def gen_frames():
     camera = cv2.VideoCapture(0)
@@ -55,14 +96,6 @@ def gen_frames():
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/video_feed')
-def video_feed():
-    return Response(gen_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))

@@ -31,6 +31,7 @@
     const video = document.getElementById('video');
     const nombreEl = document.getElementById('nombre');
 
+    // Inicializar la cámara
     async function initCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -40,6 +41,7 @@
       }
     }
 
+    // Capturar una imagen de la cámara y enviarla al servidor
     async function capturarYEnviar() {
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
@@ -49,7 +51,7 @@
       const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
 
       const formData = new FormData();
-      formData.append('frame', blob);
+      formData.append('image', blob);  // Cambié 'frame' a 'image', que es el nombre que espera el backend.
 
       try {
         const res = await fetch('/reconocer', {
@@ -57,15 +59,23 @@
           body: formData
         });
         const data = await res.json();
-        nombreEl.textContent = data.nombre;
+
+        // Mostrar los nombres de las personas reconocidas, si hay alguna
+        if (data.names && data.names.length > 0) {
+          nombreEl.textContent = "Personas reconocidas: " + data.names.join(", ");
+        } else {
+          nombreEl.textContent = "No se reconoció ningún rostro.";
+        }
       } catch (err) {
         nombreEl.textContent = "Error al detectar rostro.";
       }
     }
 
+    // Iniciar cámara al cargar la página
     initCamera();
 
-    setInterval(capturarYEnviar, 1000); // Envía una imagen por segundo
+    // Capturar y enviar imagen cada segundo
+    setInterval(capturarYEnviar, 1000);
   </script>
 </body>
 </html>
