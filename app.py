@@ -1,105 +1,50 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
+import pickle
 import face_recognition
 import numpy as np
-import pickle
+from flask import Flask, request, jsonify, render_template
 import cv2
-import base64
 import os
-import logging
+from PIL import Image
+from io import BytesIO
+
+# Cargar embeddings
+with open('rostros.pkl', 'rb') as f:
+    known_faces = pickle.load(f)
+
+known_encodings = [encoding for name, encoding in known_faces]
+known_names = [name for name, encoding in known_faces]
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
-logging.basicConfig(level=logging.INFO)
 
-# Variables globales para almacenar los datos de rostros
-rostros_codificados = []
-nombres_rostros = []
-
-def cargar_rostros():
-    global rostros_codificados, nombres_rostros
-
-    try:
-        if not os.path.exists("rostros.pkl"):
-            raise FileNotFoundError("Archivo 'rostros.pkl' no encontrado.")
-
-        with open("rostros.pkl", "rb") as f:
-            rostros_codificados, nombres_rostros = pickle.load(f)
-
-        if not rostros_codificados or not nombres_rostros:
-            raise ValueError("Datos en 'rostros.pkl' están vacíos o corruptos.")
-
-        logging.info(f"Se cargaron {len(rostros_codificados)} rostros correctamente.")
-
-    except Exception as e:
-        logging.error(f"Error al cargar rostros: {str(e)}")
-        raise RuntimeError(f"No se pudo iniciar el servicio: {str(e)}")
-
-# Cargar rostros al iniciar la aplicación
-cargar_rostros()
-
-@app.route("/")
+@app.route('/')
 def index():
-    return render_template("index.html")
+    return render_template('index.html')
 
-@app.route("/reconocer", methods=["POST"])
+@app.route('/reconocer', methods=['POST'])
 def reconocer():
-    try:
-        data_url = request.json.get("imagen", "")
-        if not data_url or len(data_url) > 10_000_000:
-            return jsonify({"error": "Datos de imagen no válidos o demasiado grandes"}), 400
+    if 'frame' not in request.files:
+        return jsonify({'nombre': 'Sin imagen'}), 400
 
-        # Decodificar imagen
-        header, encoded = data_url.split(",", 1)
-        img_bytes = base64.b64decode(encoded)
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    file = request.files['frame']
+    img = Image.open(BytesIO(file.read()))
+    frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
-        if img is None:
-            return jsonify({"error": "Imagen corrupta o formato no soportado"}), 400
+    rgb_frame = frame[:, :, ::-1]
+    face_locations = face_recognition.face_locations(rgb_frame)
+    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
 
-        # Redimensionar si es grande
-        h, w = img.shape[:2]
-        if max(h, w) > 800:
-            scale = 800 / max(h, w)
-            img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
-
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        ubicaciones = face_recognition.face_locations(rgb, model="hog")
-
-        if not ubicaciones:
-            return jsonify({"error": "No se detectaron rostros"}), 400
-
-        codigos = face_recognition.face_encodings(rgb, ubicaciones)
-        logging.info(f"Caras detectadas: {len(codigos)}")
-
-        resultados = []
-        for cod in codigos:
-            # Usar el enfoque clásico de comparación
-            matches = face_recognition.compare_faces(rostros_codificados, cod, tolerance=0.6)
-            face_distances = face_recognition.face_distance(rostros_codificados, cod)
-
-            if len(face_distances) == 0:
-                resultados.append("Desconocido")
-                continue
-
+    for face_encoding in face_encodings:
+        matches = face_recognition.compare_faces(known_encodings, face_encoding)
+        name = "Desconocido"
+        face_distances = face_recognition.face_distance(known_encodings, face_encoding)
+        if len(face_distances) > 0:
             best_match_index = np.argmin(face_distances)
             if matches[best_match_index]:
-                nombre = nombres_rostros[best_match_index]
-                resultados.append(nombre)
-                logging.info(f"Match: {nombre} (distancia: {face_distances[best_match_index]:.4f})")
-            else:
-                resultados.append("Desconocido")
-                logging.info(f"Rostro desconocido (distancia mínima: {face_distances[best_match_index]:.4f})")
+                name = known_names[best_match_index]
+        return jsonify({'nombre': name})
 
-        return jsonify({"nombre": resultados[0] if resultados else "Desconocido"})
+    return jsonify({'nombre': 'Sin rostro'})
 
-    except Exception as e:
-        logging.error(f"Error en /reconocer: {str(e)}", exc_info=True)
-        return jsonify({"error": f"Error al procesar la imagen: {str(e)}"}), 500
-
-@app.route("/models/<path:filename>")
-def serve_model(filename):
-    return send_from_directory("models", filename)
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host='0.0.0.0', port=port)

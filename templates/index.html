@@ -1,90 +1,71 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <title>Detección facial en tiempo real</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Reconocimiento Facial</title>
   <style>
-    #video {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: auto;
-      z-index: 0;
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background-color: #f0f0f0;
     }
-
-    #canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      z-index: 1;
+    video {
+      width: 360px;
+      height: auto;
+      border: 2px solid #333;
+      margin-top: 10px;
+    }
+    #nombre {
+      font-size: 1.5em;
+      margin-top: 20px;
+      font-weight: bold;
     }
   </style>
 </head>
 <body>
+  <h1>Reconocimiento Facial</h1>
   <video id="video" autoplay muted playsinline></video>
-  <canvas id="canvas"></canvas>
-
-  <!-- MediaPipe Face Detection -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-
+  <div id="nombre">Cargando...</div>
   <script>
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
+    const nombreEl = document.getElementById('nombre');
 
-    // Ajustar tamaño del canvas al video
-    function resizeCanvas() {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    }
-
-    // Dibujar recuadro en rostro
-    function drawResults(results) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (results.detections.length > 0) {
-        for (const detection of results.detections) {
-          const box = detection.boundingBox;
-          const startX = box.xCenter * canvas.width - box.width * canvas.width / 2;
-          const startY = box.yCenter * canvas.height - box.height * canvas.height / 2;
-          const boxWidth = box.width * canvas.width;
-          const boxHeight = box.height * canvas.height;
-
-          ctx.beginPath();
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = 'lime';
-          ctx.rect(startX, startY, boxWidth, boxHeight);
-          ctx.stroke();
-        }
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+      } catch (err) {
+        nombreEl.textContent = "No se pudo acceder a la cámara.";
       }
     }
 
-    // Inicializar detector
-    const faceDetector = new FaceDetection({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
-    });
+    async function capturarYEnviar() {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
 
-    faceDetector.setOptions({
-      model: 'short', // rápido, también puedes usar 'full' si prefieres más precisión
-      minDetectionConfidence: 0.5
-    });
+      const formData = new FormData();
+      formData.append('frame', blob);
 
-    faceDetector.onResults(drawResults);
+      try {
+        const res = await fetch('/reconocer', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        nombreEl.textContent = data.nombre;
+      } catch (err) {
+        nombreEl.textContent = "Error al detectar rostro.";
+      }
+    }
 
-    // Inicializar cámara
-    const camera = new Camera(video, {
-      onFrame: async () => {
-        resizeCanvas();
-        await faceDetector.send({ image: video });
-      },
-      width: 640,
-      height: 480
-    });
+    initCamera();
 
-    camera.start();
+    setInterval(capturarYEnviar, 1000); // Envía una imagen por segundo
   </script>
 </body>
 </html>
