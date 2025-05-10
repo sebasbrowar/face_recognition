@@ -6,8 +6,6 @@ Este proyecto permite detectar y reconocer rostros en tiempo real utilizando la 
 
 La organización del repositorio [sebasbrowar/face_recognition](https://github.com/sebasbrowar/face_recognition) sigue esta estructura:
 
-# Estructura del Proyecto face_recognition
-
 ```plaintext
 face_recognition/
 ├── app.py                       # Aplicación principal Flask
