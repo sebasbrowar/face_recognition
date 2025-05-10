@@ -88,8 +88,8 @@ def reconocer():
         for cod in codigos:
             distancias, indices = kdtree.query(cod, k=1)  # Solo el mejor match
 
-            # Umbral más permisivo (0.7)
-            if distancias < 0.7:
+            # Umbral
+            if distancias < 0.5:
                 nombres.append(nombres_rostros[indices])
             else:
                 nombres.append("Desconocido")
