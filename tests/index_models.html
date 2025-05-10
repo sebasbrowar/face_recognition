@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Reconocimiento Facial</title>
+  <script defer src="/static/js/face-api.min.js"></script>
+  <style>
+    body {
+      background-color: #1e1e1e;
+      color: white;
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    h1 {
+      color: #ff8800;
+      margin: 10px 0;
+      font-size: 1.5rem;
+      text-align: center;
+    }
+
+    #camera-wrapper {
+      position: relative;
+      width: 100%;
+      flex-grow: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    #video-container {
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      max-height: 70vh;
+    }
+
+    video {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    #nombreDetectado {
+      text-align: center;
+      font-size: 1.2rem;
+      color: #ff8800;
+      margin: 10px 0;
+      padding: 0 10px;
+    }
+
+    #loader {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 1.2rem;
+      background: rgba(0,0,0,0.7);
+      padding: 15px;
+      border-radius: 8px;
+      z-index: 100;
+    }
+
+    #controls {
+      text-align: center;
+      margin: 10px 0;
+    }
+
+    button {
+      background-color: #ff8800;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      font-size: 1rem;
+      cursor: pointer;
+      margin: 5px;
+    }
+
+    @media (orientation: landscape) {
+      #video-container {
+        max-height: 60vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Reconocimiento Facial</h1>
+  <div id="loader">Cargando modelos...</div>
+
+  <div id="camera-wrapper">
+    <div id="video-container">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+  </div>
+
+  <div id="controls" style="display: none;">
+    <button id="toggleCamera">Detener Cámara</button>
+  </div>
+
+  <div id="nombreDetectado">Esperando detección...</div>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('overlay');
+    const context = canvas.getContext('2d');
+    const nombreDiv = document.getElementById('nombreDetectado');
+    const loader = document.getElementById('loader');
+    const controls = document.getElementById('controls');
+    const toggleCameraBtn = document.getElementById('toggleCamera');
+    const videoContainer = document.getElementById('video-container');
+
+    let stream = null;
+    let detectionInterval = null;
+    let isCameraActive = false;
+
+    // Ajustar tamaño del canvas
+    function resizeCanvas() {
+      canvas.width = video.videoWidth || video.offsetWidth;
+      canvas.height = video.videoHeight || video.offsetHeight;
+    }
+
+    // Configurar cámara
+    async function setupCamera() {
+      try {
+        const constraints = {
+          video: {
+            facingMode: "user",
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
+        };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            video.play();
+            // Ajustar contenedor para mantener relación de aspecto
+            const aspectRatio = video.videoWidth / video.videoHeight;
+            videoContainer.style.width = '100%';
+            videoContainer.style.height = `calc(100vw / ${aspectRatio})`;
+            videoContainer.style.maxHeight = '70vh';
+
+            resizeCanvas();
+            resolve();
+          };
+        });
+      } catch (error) {
+        console.error("Error al acceder a la cámara:", error);
+        showError("No se pudo acceder a la cámara. Asegúrate de permitir los permisos.");
+        throw error;
+      }
+    }
+
+    // Cargar modelos
+    async function cargarModelos() {
+      try {
+        loader.textContent = "Cargando modelos de detección facial...";
+
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+          faceapi.nets.faceRecognitionNet.loadFromUri('/models')
+        ]);
+
+        loader.textContent = "Modelos cargados correctamente!";
+      } catch (error) {
+        console.error("Error cargando modelos:", error);
+        showError("Error al cargar los modelos de reconocimiento");
+        throw error;
+      }
+    }
+
+    // Iniciar cámara
+    async function iniciarCamara() {
+      if (isCameraActive) return;
+
+      try {
+        await setupCamera();
+        isCameraActive = true;
+        toggleCameraBtn.textContent = "Detener Cámara";
+        detectarEnTiempoReal();
+      } catch (error) {
+        console.error("Error iniciando cámara:", error);
+      }
+    }
+
+    // Detener cámara
+    function detenerCamara() {
+      if (!isCameraActive) return;
+
+      clearInterval(detectionInterval);
+      detectionInterval = null;
+
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+
+      isCameraActive = false;
+      toggleCameraBtn.textContent = "Activar Cámara";
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      nombreDiv.textContent = "Cámara detenida";
+    }
+
+    // Detección en tiempo real
+    async function detectarEnTiempoReal() {
+      detectionInterval = setInterval(async () => {
+        try {
+          if (!video.videoWidth) return;
+
+          const opciones = new faceapi.TinyFaceDetectorOptions({
+            inputSize: 320,
+            scoreThreshold: 0.5
+          });
+
+          const detecciones = await faceapi.detectAllFaces(video, opciones)
+            .withFaceLandmarks()
+            .withFaceDescriptors();
+
+          context.clearRect(0, 0, canvas.width, canvas.height);
+
+          if (detecciones.length > 0) {
+            const resizedDetections = faceapi.resizeResults(detecciones, {
+              width: video.videoWidth,
+              height: video.videoHeight
+            });
+
+            // Dibujar solo el rectángulo de detección
+            faceapi.draw.drawDetections(canvas, resizedDetections);
+            await capturarYReconocer(detecciones);
+          } else {
+            nombreDiv.textContent = "Buscando rostros...";
+          }
+        } catch (error) {
+          console.error("Error en detección:", error);
+          nombreDiv.textContent = "Error en detección";
+        }
+      }, 300);
+    }
+
+    // Capturar y reconocer
+    async function capturarYReconocer(detecciones) {
+      try {
+        nombreDiv.textContent = "Procesando rostro...";
+
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = video.videoWidth;
+        tempCanvas.height = video.videoHeight;
+        const tempCtx = tempCanvas.getContext("2d");
+        tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+        const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.8);
+
+        const respuesta = await fetch('/reconocer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imagen: dataUrl })
+        });
+
+        if (!respuesta.ok) {
+          throw new Error(`Error del servidor: ${respuesta.status}`);
+        }
+
+        const resultado = await respuesta.json();
+
+        if (resultado.nombre) {
+          nombreDiv.textContent = `Reconocido: ${resultado.nombre}`;
+        } else {
+          nombreDiv.textContent = "Rostro no reconocido";
+        }
+      } catch (error) {
+        console.error("Error en reconocimiento:", error);
+        nombreDiv.textContent = "Error al reconocer rostro";
+      }
+    }
+
+    // Mostrar errores
+    function showError(message) {
+      console.error(message);
+      loader.textContent = message;
+      loader.style.color = "#ff4444";
+    }
+
+    // Event listeners
+    toggleCameraBtn.addEventListener('click', () => {
+      if (isCameraActive) {
+        detenerCamara();
+      } else {
+        iniciarCamara();
+      }
+    });
+
+    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('orientationchange', resizeCanvas);
+
+    window.addEventListener('beforeunload', () => {
+      detenerCamara();
+    });
+
+    // Iniciar la aplicación
+    window.onload = async () => {
+      if (typeof faceapi === 'undefined') {
+        showError('face-api.js no se ha cargado correctamente');
+        return;
+      }
+
+      try {
+        await cargarModelos();
+        loader.style.display = 'none';
+        controls.style.display = 'block';
+        iniciarCamara();
+      } catch (error) {
+        console.error("Error inicializando:", error);
+      }
+    };
+  </script>
+</body>
+</html>

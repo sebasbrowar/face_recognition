@@ -5,6 +5,7 @@ import pickle
 import cv2
 import base64
 import os
+from scipy.spatial import KDTree
 import logging
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
@@ -13,32 +14,40 @@ logging.basicConfig(level=logging.INFO)
 # Variables globales para almacenar los datos de rostros
 rostros_codificados = []
 nombres_rostros = []
+kdtree = None
+
 
 def cargar_rostros():
-    global rostros_codificados, nombres_rostros
+    global rostros_codificados, nombres_rostros, kdtree
 
     try:
-        if not os.path.exists("rostros.pkl"):
+        if not os.path.exists("../rostros.pkl"):
             raise FileNotFoundError("Archivo 'rostros.pkl' no encontrado.")
 
-        with open("rostros.pkl", "rb") as f:
+        with open("../rostros.pkl", "rb") as f:
             rostros_codificados, nombres_rostros = pickle.load(f)
 
         if not rostros_codificados or not nombres_rostros:
             raise ValueError("Datos en 'rostros.pkl' están vacíos o corruptos.")
 
-        logging.info(f"Se cargaron {len(rostros_codificados)} rostros correctamente.")
+        # Convertir a numpy array y construir KDTree
+        rostros_array = np.array(rostros_codificados)
+        kdtree = KDTree(rostros_array)
+        logging.info(f"Se cargaron {len(rostros_codificados)} rostros. KDTree construido.")
 
     except Exception as e:
         logging.error(f"Error al cargar rostros: {str(e)}")
         raise RuntimeError(f"No se pudo iniciar el servicio: {str(e)}")
 
+
 # Cargar rostros al iniciar la aplicación
 cargar_rostros()
 
+
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index_models.html")
+
 
 @app.route("/reconocer", methods=["POST"])
 def reconocer():
@@ -56,12 +65,13 @@ def reconocer():
         if img is None:
             return jsonify({"error": "Imagen corrupta o formato no soportado"}), 400
 
-        # Redimensionar si es grande
+        # Optimización: Redimensionar si es muy grande
         h, w = img.shape[:2]
         if max(h, w) > 800:
             scale = 800 / max(h, w)
             img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
 
+        # Convertir a RGB y detectar rostros
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         ubicaciones = face_recognition.face_locations(rgb, model="hog")
 
@@ -71,34 +81,33 @@ def reconocer():
         codigos = face_recognition.face_encodings(rgb, ubicaciones)
         logging.info(f"Caras detectadas: {len(codigos)}")
 
+        # Buscar coincidencias usando KDTree
         resultados = []
         for cod in codigos:
-            # Usar el enfoque clásico de comparación
-            matches = face_recognition.compare_faces(rostros_codificados, cod, tolerance=0.6)
-            face_distances = face_recognition.face_distance(rostros_codificados, cod)
+            distancias, indices = kdtree.query(cod, k=5)  # Buscar 5 vecinos más cercanos
 
-            if len(face_distances) == 0:
-                resultados.append("Desconocido")
-                continue
-
-            best_match_index = np.argmin(face_distances)
-            if matches[best_match_index]:
-                nombre = nombres_rostros[best_match_index]
+            # Verificar si la mejor coincidencia está dentro del umbral
+            if distancias[0] < 0.6:
+                nombre = nombres_rostros[indices[0]]
                 resultados.append(nombre)
-                logging.info(f"Match: {nombre} (distancia: {face_distances[best_match_index]:.4f})")
+                logging.info(f"Match encontrado: {nombre} (Distancia: {distancias[0]:.4f})")
             else:
-                resultados.append("Desconocido")
-                logging.info(f"Rostro desconocido (distancia mínima: {face_distances[best_match_index]:.4f})")
+                logging.info(f"Rostro desconocido (Distancia mínima: {distancias[0]:.4f})")
 
-        return jsonify({"nombre": resultados[0] if resultados else "Desconocido"})
+        if resultados:
+            return jsonify({"nombre": resultados[0]})  # Devuelve el primer reconocimiento
+        else:
+            return jsonify({"nombre": "Desconocido"})
 
     except Exception as e:
         logging.error(f"Error en /reconocer: {str(e)}", exc_info=True)
         return jsonify({"error": f"Error al procesar la imagen: {str(e)}"}), 500
 
+
 @app.route("/models/<path:filename>")
 def serve_model(filename):
-    return send_from_directory("models", filename)
+    return send_from_directory("../models", filename)
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
