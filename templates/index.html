@@ -1,81 +1,219 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Reconocimiento Facial</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      background-color: #f0f0f0;
-    }
-    video {
-      width: 360px;
-      height: auto;
-      border: 2px solid #333;
-      margin-top: 10px;
-    }
-    #nombre {
-      font-size: 1.5em;
-      margin-top: 20px;
-      font-weight: bold;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reconocimiento Facial en Tiempo Real</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        #video-container {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        #video {
+            border: 2px solid #333;
+            border-radius: 8px;
+            max-width: 100%;
+            transform: scaleX(-1);  /* ← Esto invierte la cámara */
+        }
+        #results {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+            min-height: 50px;
+        }
+        .face-box {
+            position: absolute;
+            border: 2px solid #0f0;
+            background-color: rgba(0, 255, 0, 0.1);
+        }
+        .face-name {
+            position: absolute;
+            color: white;
+            background-color: rgba(0, 255, 0, 0.7);
+            padding: 2px 5px;
+            font-size: 12px;
+        }
+        #fps {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+    </style>
 </head>
 <body>
-  <h1>Reconocimiento Facial</h1>
-  <video id="video" autoplay muted playsinline></video>
-  <div id="nombre">Cargando...</div>
-  <script>
-    const video = document.getElementById('video');
-    const nombreEl = document.getElementById('nombre');
+    <h1>Reconocimiento Facial en Tiempo Real</h1>
 
-    // Inicializar la cámara
-    async function initCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        video.srcObject = stream;
-      } catch (err) {
-        nombreEl.textContent = "No se pudo acceder a la cámara.";
-      }
-    }
+    <div id="video-container">
+        <div id="fps">FPS: 0</div>
+        <video id="video" width="640" height="480" autoplay muted></video>
+    </div>
 
-    // Capturar una imagen de la cámara y enviarla al servidor
-    async function capturarYEnviar() {
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
+    <div id="results">
+        <p>Reconociendo rostros en tiempo real...</p>
+    </div>
 
-      const formData = new FormData();
-      formData.append('image', blob);  // Cambié 'frame' a 'image', que es el nombre que espera el backend.
+    <script>
+        const video = document.getElementById('video');
+        const resultsDiv = document.getElementById('results');
+        const videoContainer = document.getElementById('video-container');
+        const fpsDisplay = document.getElementById('fps');
 
-      try {
-        const res = await fetch('/reconocer', {
-          method: 'POST',
-          body: formData
-        });
-        const data = await res.json();
+        // Variables para control de FPS
+        let lastTimestamp = 0;
+        let frameCount = 0;
+        let currentFps = 0;
+        const fpsInterval = 1000; // Actualizar FPS cada segundo
 
-        // Mostrar los nombres de las personas reconocidas, si hay alguna
-        if (data.names && data.names.length > 0) {
-          nombreEl.textContent = "Personas reconocidas: " + data.names.join(", ");
-        } else {
-          nombreEl.textContent = "No se reconoció ningún rostro.";
+        // Acceso a la cámara
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    // Iniciar el proceso de reconocimiento
+                    processVideo();
+                };
+            })
+            .catch(err => {
+                resultsDiv.innerHTML = `<p style="color:red">Error al acceder a la cámara: ${err.message}</p>`;
+            });
+
+        // Función para procesar el video en tiempo real
+        async function processVideo() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Establecer el tamaño del canvas igual al video
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // Función recursiva para procesar frames
+            async function processFrame() {
+                // Control de FPS
+                const now = performance.now();
+                frameCount++;
+
+                if (now - lastTimestamp >= fpsInterval) {
+                    currentFps = Math.round((frameCount * 1000) / (now - lastTimestamp));
+                    fpsDisplay.textContent = `FPS: ${currentFps}`;
+                    frameCount = 0;
+                    lastTimestamp = now;
+                }
+
+                // Dibujar el frame actual en el canvas
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                try {
+                    // Optimización: Solo procesar cada 3 frames
+                    if (frameCount % 3 === 0) {
+                        const blob = await new Promise(resolve => {
+                            canvas.toBlob(resolve, 'image/jpeg', 0.7);
+                        });
+
+                        const formData = new FormData();
+                        formData.append('frame', blob);
+
+                        // Enviar frame al servidor para reconocimiento
+                        const response = await fetch('/reconocer', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            displayResults(data);
+                        } else if (data.error) {
+                            console.error('Error del servidor:', data.error);
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error procesando frame:', err);
+                }
+
+                // Procesar siguiente frame
+                requestAnimationFrame(processFrame);
+            }
+
+            // Iniciar el procesamiento
+            processFrame();
         }
-      } catch (err) {
-        nombreEl.textContent = "Error al detectar rostro.";
-      }
-    }
 
-    // Iniciar cámara al cargar la página
-    initCamera();
+        // Mostrar resultados en la página
+        function displayResults(data) {
+            // Limpiar cuadros anteriores
+            document.querySelectorAll('.face-box, .face-name').forEach(el => el.remove());
 
-    // Capturar y enviar imagen cada segundo
-    setInterval(capturarYEnviar, 1000);
-  </script>
+            if (data.count === 0) {
+                resultsDiv.innerHTML = '<p>No se detectaron rostros</p>';
+                return;
+            }
+
+            // Dibujar cuadros en el video
+            drawFaceBoxes(data.locations, data.names);
+
+            // Actualizar resumen de resultados
+            const uniqueNames = [...new Set(data.names)];
+            resultsDiv.innerHTML = `
+                <h3>Personas reconocidas:</h3>
+                <ul>
+                    ${uniqueNames.map(name => `<li>${name}</li>`).join('')}
+                </ul>
+                <p>Total de rostros detectados: ${data.count}</p>
+                <p>Procesando a ${currentFps} FPS</p>
+            `;
+        }
+
+        // Dibujar cuadros alrededor de los rostros
+        function drawFaceBoxes(locations, names) {
+            // Calcular relación de tamaño entre el canvas y el video
+            const videoWidth = video.videoWidth;
+            const videoHeight = video.videoHeight;
+            const displayWidth = video.offsetWidth;
+            const displayHeight = video.offsetHeight;
+
+            const scaleX = displayWidth / videoWidth;
+            const scaleY = displayHeight / videoHeight;
+
+            locations.forEach(([top, right, bottom, left], index) => {
+                // Ajustar coordenadas al tamaño mostrado
+                const adjLeft = left * scaleX;
+                const adjTop = top * scaleY;
+                const adjWidth = (right - left) * scaleX;
+                const adjHeight = (bottom - top) * scaleY;
+
+                // Crear elemento para el cuadro
+                const box = document.createElement('div');
+                box.className = 'face-box';
+                box.style.left = `${adjLeft}px`;
+                box.style.top = `${adjTop}px`;
+                box.style.width = `${adjWidth}px`;
+                box.style.height = `${adjHeight}px`;
+
+                // Crear elemento para el nombre
+                const nameTag = document.createElement('div');
+                nameTag.className = 'face-name';
+                nameTag.textContent = names[index];
+                nameTag.style.left = `${adjLeft}px`;
+                nameTag.style.top = `${adjTop + adjHeight - 2}px`;
+                nameTag.style.width = `${adjWidth}px`;
+
+                videoContainer.appendChild(box);
+                videoContainer.appendChild(nameTag);
+            });
+        }
+    </script>
 </body>
 </html>

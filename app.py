@@ -1,102 +1,119 @@
-import pickle
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import face_recognition
 import numpy as np
-from flask import Flask, render_template, Response, jsonify, request
-import cv2, os
-from io import BytesIO
-from PIL import Image
-
-# Cargar embeddings desde el archivo 'rostros.pkl'
-with open('rostros.pkl', 'rb') as f:
-    known_faces = pickle.load(f)
-
-# Desempaquetar los encodings de cada persona
-known_encodings = []
-known_names = []
-
-for i, encodings in enumerate(known_faces[:-1]):  # Excluimos el último elemento que es la lista de nombres
-    known_encodings.extend(encodings)
-    known_names.extend([known_faces[-1][i]] * len(encodings))  # Añadimos el nombre correspondiente a cada encoding
+import pickle
+import cv2
+import base64
+import os
+from scipy.spatial import KDTree
+import logging
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
+logging.basicConfig(level=logging.INFO)
+
+# Variables globales para almacenar los datos de rostros
+rostros_codificados = []
+nombres_rostros = []
+kdtree = None
 
 
-# Ruta para la página principal
-@app.route('/')
+def cargar_rostros():
+    global rostros_codificados, nombres_rostros, kdtree
+
+    try:
+        if not os.path.exists("rostros.pkl"):
+            raise FileNotFoundError("Archivo 'rostros.pkl' no encontrado.")
+
+        with open("rostros.pkl", "rb") as f:
+            rostros_codificados, nombres_rostros = pickle.load(f)
+
+        if not rostros_codificados or not nombres_rostros:
+            raise ValueError("Datos en 'rostros.pkl' están vacíos o corruptos.")
+
+        # Convertir a numpy array y construir KDTree
+        rostros_array = np.array(rostros_codificados)
+        kdtree = KDTree(rostros_array)
+        logging.info(f"Se cargaron {len(rostros_codificados)} rostros. KDTree construido.")
+
+    except Exception as e:
+        logging.error(f"Error al cargar rostros: {str(e)}")
+        raise RuntimeError(f"No se pudo iniciar el servicio: {str(e)}")
+
+
+# Cargar rostros al iniciar la aplicación
+cargar_rostros()
+
+
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
 
-# Ruta para el video feed (streaming en vivo desde la cámara)
-@app.route('/video_feed')
-def video_feed():
-    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-
-# Ruta para el reconocimiento de la cara cuando se envía una imagen desde el cliente
-@app.route('/reconocer', methods=['POST'])
+@app.route("/reconocer", methods=["POST"])
 def reconocer():
-    file = request.files['image']  # Recibe la imagen desde el cliente
-    img = Image.open(file.stream)  # Convierte la imagen recibida en un objeto PIL
-    frame = np.array(img)  # Convierte la imagen PIL a un array de NumPy (compatible con OpenCV)
+    try:
+        # Cambiar para aceptar FormData
+        if 'frame' not in request.files:
+            return jsonify({"error": "No se proporcionó imagen"}), 400
 
-    rgb_frame = frame[:, :, ::-1]  # Convierte la imagen a RGB (para face_recognition)
-    face_locations = face_recognition.face_locations(rgb_frame)
-    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+        file = request.files['frame']
+        img = cv2.imdecode(np.frombuffer(file.read(), np.uint8), cv2.IMREAD_COLOR)
 
-    names = []
-    for face_encoding in face_encodings:
-        matches = face_recognition.compare_faces(known_encodings, face_encoding)
-        name = "Desconocido"
+        # Invertir horizontalmente la imagen (como se ve en pantalla)
+        img = cv2.flip(img, 1)
 
-        face_distances = face_recognition.face_distance(known_encodings, face_encoding)
-        if len(face_distances) > 0:
-            best_match_index = np.argmin(face_distances)
-            if matches[best_match_index]:
-                name = known_names[best_match_index]
-        names.append(name)
+        if img is None:
+            return jsonify({"error": "Imagen corrupta"}), 400
 
-    # Devolver el resultado (por ejemplo, el nombre de la persona reconocida)
-    return jsonify({'names': names, 'locations': face_locations})
+        # Optimización: Redimensionar
+        h, w = img.shape[:2]
+        if max(h, w) > 800:
+            scale = 800 / max(h, w)
+            img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
 
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        ubicaciones = face_recognition.face_locations(rgb, model="hog")
 
-def gen_frames():
-    camera = cv2.VideoCapture(0)
+        if not ubicaciones:
+            return jsonify({
+                "success": True,
+                "count": 0,
+                "locations": [],
+                "names": []
+            })
 
-    while True:
-        success, frame = camera.read()
-        if not success:
-            break
+        codigos = face_recognition.face_encodings(rgb, ubicaciones)
 
-        rgb_frame = frame[:, :, ::-1]
-        face_locations = face_recognition.face_locations(rgb_frame)
-        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+        nombres = []
+        for cod in codigos:
+            distancias, indices = kdtree.query(cod, k=1)  # Solo el mejor match
 
-        names = []
-        for face_encoding in face_encodings:
-            matches = face_recognition.compare_faces(known_encodings, face_encoding)
-            name = "Desconocido"
+            # Umbral más permisivo (0.7)
+            if distancias < 0.7:
+                nombres.append(nombres_rostros[indices])
+            else:
+                nombres.append("Desconocido")
 
-            face_distances = face_recognition.face_distance(known_encodings, face_encoding)
-            if len(face_distances) > 0:
-                best_match_index = np.argmin(face_distances)
-                if matches[best_match_index]:
-                    name = known_names[best_match_index]
-            names.append(name)
+        return jsonify({
+            "success": True,
+            "count": len(ubicaciones),
+            "locations": ubicaciones,
+            "names": nombres
+        })
 
-        # Dibujar rectángulos y nombres
-        for (top, right, bottom, left), name in zip(face_locations, names):
-            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-            cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 255, 0), cv2.FILLED)
-            cv2.putText(frame, name, (left + 6, bottom - 6),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 0, 0), 1)
-
-        ret, buffer = cv2.imencode('.jpg', frame)
-        frame = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+    except Exception as e:
+        logging.error(f"Error en /reconocer: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
-if __name__ == '__main__':
+@app.route("/models/<path:filename>")
+def serve_model(filename):
+    return send_from_directory("models", filename)
+
+
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
